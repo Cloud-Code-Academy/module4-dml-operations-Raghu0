@@ -127,7 +127,7 @@ public with sharing class DMLOperations {
      */
     public static void updateAccountFields(Id accountId, String newName, String newIndustry) {
         // Query the account
-        List<Account> acc = [SELECT Id, Name, Industry FROM Account WHERE Id = :accountId];
+        List<Account> acc = [SELECT Id FROM Account WHERE Id = :accountId];
 
         // Update the Account with the given Id with the new name and industry
         acc[0].Name = newName;
@@ -170,6 +170,40 @@ public with sharing class DMLOperations {
      * @param oppNames The list of Opportunity names.
      */
     public static void upsertOpportunities(String accountName, List<String> oppNames) {
+
+        List<Account> accts = [SELECT Id FROM Account WHERE Name = :accountName LIMIT 1];
+        Account acc;
+        if(accts.isEmpty()){
+            acc = new Account(Name = accountName);
+            insert acc;
+        }
+        else {
+            acc = accts[0];
+        }
+        
+        Map<String, Opportunity> oppMap = new Map<String, Opportunity>();
+        for(Opportunity opp : [SELECT Id, AccountId, Name FROM Opportunity WHERE Name IN : oppNames]){
+            oppMap.put(opp.Name, opp);
+        }
+        List<Opportunity> oppsToUpsert = new List<Opportunity>();
+        for(String oppName : oppNames){
+            Opportunity opp = oppMap.get(oppName);
+            if(opp == null){
+                opp = new Opportunity (
+                    Name = oppName,
+                    AccountId = acc.Id,
+                    StageName = 'Prospecting',
+                    CloseDate = Date.today().addMonths(2)
+                );
+            } else if (opp.AccountId != acc.Id){
+                opp.AccountId = acc.Id;
+            }
+            oppsToUpsert.add(opp);
+        }
+        upsert oppsToUpsert;
+    }
+
+        /*
         List<Opportunity> oppsToBeCreated = new List<Opportunity>();
         // Loop through each Opportunity name
         for(String oppName : oppNames){
@@ -193,7 +227,7 @@ public with sharing class DMLOperations {
                 opp.AccountId = newAccount.Id;
             }
         upsert oppsToBeCreated;
-    }
+    }*/
     
     /**
      * Question 9
@@ -203,10 +237,11 @@ public with sharing class DMLOperations {
 	 * @param accountName The name of the Account to be upserted.
 	 * @return The Account that was upserted.
 	 */
+
+     
 	public static Account upsertAccount(String accountName) {
         Account acc = new Account();
         // Query for the Account
-        try {
             List<Account> account = [SELECT Id, Name, Description FROM Account WHERE Name = :accountName];
             // if the Account exists, update the description
             if(!account.isEmpty()){
@@ -220,11 +255,8 @@ public with sharing class DMLOperations {
             }
             // Upsert the Account
             upsert acc;
-            
-        } catch (QueryException e) {
-            system.debug('No account found with the name::: ' +accountName);           
-        }
-        return acc;  
+            return acc;
+
         }
 
     /**
@@ -241,7 +273,44 @@ public with sharing class DMLOperations {
         //Check if there is any existing account
         //If account found with contact last name, update the current contact
         //If account not found, create an account and map it to current contact
- 
+        Set<String> contactLastNames = new Set<String>();
+        for (Contact con : contactsToUpsert) {
+          contactLastNames.add(con.LastName);
+        }
+        
+        List<Account> existingAccounts = [SELECT Name FROM Account WHERE Name IN :contactLastNames];
+        Map<String, Id> existingAccountNameToID = new Map<String, Id>();
+        for(Account acc : existingAccounts){
+            existingAccountNameToID.put(acc.Name, acc.Id);
+        }
+        
+        List<Account> accountsToCreate = new List<Account>();
+        for (Contact con : contactsToUpsert) {
+          if (!existingAccountNameToID.containsKey(con.LastName)) {
+            accountsToCreate.add(new Account(Name = con.LastName));
+          }
+          else {
+            con.AccountId = existingAccountNameToID.get(con.LastName);
+          }
+        }
+        
+        if (accountsToCreate.size() > 0) {
+          insert accountsToCreate;
+        }
+        
+        for(Contact con : contactsToUpsert){
+                for(Account acc : new Set<Account>([SELECT Id, Name FROM Account])){
+                    if(con.LastName == acc.Name){
+                        if(con.AccountId != acc.Id){
+                            con.AccountId = acc.Id;
+                        }
+                    }
+                }
+            
+        }
+        upsert contactsToUpsert;
+
+        /*
         Set<String> uniqueAccounts = new Set<String>();
         for(Contact cont : contactsToUpsert){
             uniqueAccounts.add(cont.LastName);
@@ -266,7 +335,7 @@ public with sharing class DMLOperations {
             }
 
         }
-        upsert contactsToUpsert;
+        upsert contactsToUpsert;*/
     }
 
 
